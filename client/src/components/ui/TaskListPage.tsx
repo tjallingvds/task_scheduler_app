@@ -1,7 +1,7 @@
 // src/components/TaskListPage.tsx
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { fetchTaskListById, fetchTasks, createTask, updateTask, deleteTask } from '@/lib/api';
+import { fetchTaskListById, fetchTasks, createTask, updateTask, deleteTask } from '@/services/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
