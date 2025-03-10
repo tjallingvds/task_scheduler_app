@@ -27,8 +27,17 @@ dist-ssr
 __pycache__/
 *.py[cod]
 server/venv/
+server/firebase_credentials.json  # Firebase service account key
 
 # Node
 node_modules/
 dist/
 .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Firebase
+**/firebase_credentials.json
+**/serviceAccountKey.json

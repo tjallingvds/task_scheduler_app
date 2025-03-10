@@ -5,6 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { signInWithGoogle, signInWithGithub } from "@/lib/firebase";
+import { ChromeIcon, GithubIcon } from "lucide-react";
 
 export function RegisterForm({
   className,
@@ -14,7 +16,7 @@ export function RegisterForm({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const { register, error, clearError } = useAuth();
+  const { register, error, loginWithFirebase, clearError } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -26,6 +28,32 @@ export function RegisterForm({
       navigate("/"); // Redirect to dashboard after registration
     } catch (error) {
       console.error("Registration error:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    try {
+      setIsLoading(true);
+      const user = await signInWithGoogle();
+      await loginWithFirebase(user);
+      navigate("/");
+    } catch (error) {
+      console.error("Google Sign-In Error:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleGitHubSignIn = async () => {
+    try {
+      setIsLoading(true);
+      const user = await signInWithGithub();
+      await loginWithFirebase(user);
+      navigate("/");
+    } catch (error) {
+      console.error("GitHub Sign-In Error:", error);
     } finally {
       setIsLoading(false);
     }
@@ -79,14 +107,38 @@ export function RegisterForm({
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
-        </div>
-        <Button 
+        </div><Button 
           type="submit" 
           className="w-full"
           disabled={isLoading}
         >
           {isLoading ? "Creating account..." : "Create account"}
         </Button>
+        <div className="relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t after:border-border">
+          <span className="relative z-10 bg-background px-2 text-muted-foreground">
+            Or continue with
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Button 
+            variant="outline" 
+            type="button" 
+            onClick={handleGoogleSignIn}
+            disabled={isLoading}
+          >
+            <ChromeIcon className="mr-2 h-4 w-4" />
+            Google
+          </Button>
+          <Button 
+            variant="outline" 
+            type="button" 
+            onClick={handleGitHubSignIn}
+            disabled={isLoading}
+          >
+            <GithubIcon className="mr-2 h-4 w-4" />
+            GitHub
+          </Button>
+        </div>
       </div>
       <div className="text-center text-sm">
         Already have an account?{" "}

@@ -1,20 +1,77 @@
+import os
+import json
+import base64
+import traceback
+from models import db, User, TaskList, Task
 from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 from flask_bcrypt import Bcrypt
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from models import db, User, TaskList, Task
+from firebase_admin import credentials, initialize_app, auth
+import firebase_admin
+from dotenv import load_dotenv
 import os
 
+# Load environment variables from .env file
+load_dotenv()
+
+def initialize_firebase_app():
+    try:
+        # Check if Firebase credentials are in environment variable
+        firebase_creds_str = os.environ.get('FIREBASE_CREDENTIALS')
+        
+        if not firebase_creds_str:
+            raise ValueError("Firebase credentials not found in environment variables")
+        
+        try:
+            # Try to decode base64 encoded credentials
+            firebase_creds_json = json.loads(base64.b64decode(firebase_creds_str).decode('utf-8'))
+        except Exception:
+            # If base64 decoding fails, try direct JSON parsing
+            try:
+                firebase_creds_json = json.loads(firebase_creds_str)
+            except Exception as json_error:
+                print(f"Unable to parse Firebase credentials: {json_error}")
+                raise ValueError("Unable to parse Firebase credentials")
+        
+        # Remove any existing Firebase apps before initializing
+        try:
+            firebase_admin.get_app()
+            firebase_admin._apps.clear()
+        except ValueError:
+            pass
+        
+        # Create credentials
+        cred = credentials.Certificate(firebase_creds_json)
+        
+        # Initialize Firebase Admin SDK
+        firebase_admin.initialize_app(cred)
+        
+        print("Firebase Admin SDK initialized successfully")
+    
+    except Exception as e:
+        print(f"Firebase Admin initialization error: {e}")
+        traceback.print_exc()
+        raise
+
+# Create Flask app
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-change-in-production')
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Initialize Firebase BEFORE creating other app extensions
+initialize_firebase_app()
 
 # Initialize extensions
 CORS(app, supports_credentials=True)
 bcrypt = Bcrypt(app)
 db.init_app(app)
 login_manager = LoginManager(app)
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -445,6 +502,70 @@ def delete_task_keep_children(task_id):
     db.session.commit()
     
     return jsonify({"message": "Task deleted and children preserved"}), 200
+    
+@app.route('/api/login/firebase', methods=['POST'])
+def firebase_login():  # Changed method name to be unique
+    # Existing implementation from previous response
+    data = request.json
+    
+    print("Firebase Login Endpoint Reached!")  # Debug print
+    print("Received Data:", data)  # Print received data
+    
+    # Rest of the previous implementation...
+        
+    # Ensure all required data is present
+    id_token = data.get('idToken')
+    email = data.get('email')
+    name = data.get('name', '')
 
+    if not id_token or not email:
+        return jsonify({"error": "Missing authentication credentials"}), 400
+
+    try:
+        # Verify Firebase ID token
+        decoded_token = auth.verify_id_token(
+            id_token, 
+            check_revoked=True,  # Check if the token has been revoked
+            clock_skew_seconds=60  # Reduced clock skew to recommended max
+        )
+        
+        # Additional token validation
+        if decoded_token.get('email') != email:
+            print(f"Email mismatch: token email {decoded_token.get('email')} vs provided {email}")
+            return jsonify({"error": "Email verification failed"}), 401
+
+        # Check if user already exists in our database
+        user = User.query.filter_by(email=email).first()
+
+        if not user:
+            # Create new user if not exists
+            new_user = User(
+                email=email,
+                name=name or decoded_token.get('name', ''),
+                # Use a placeholder for password since Firebase handles authentication
+                password=bcrypt.generate_password_hash('firebase_auth').decode('utf-8')
+            )
+            db.session.add(new_user)
+            db.session.commit()
+            user = new_user
+
+        # Log the user in
+        login_user(user)
+
+        return jsonify({
+            "id": user.id,
+            "email": user.email,
+            "name": user.name
+        }), 200
+
+    except ValueError as e:
+        # Invalid token specific errors
+        print(f"Firebase token verification error: {str(e)}")
+        return jsonify({"error": f"Invalid authentication token: {str(e)}"}), 401
+    except Exception as e:
+        # Catch-all for any other unexpected errors
+        print(f"Unexpected Firebase login error: {str(e)}")
+        traceback.print_exc()  # Print full traceback for debugging
+        return jsonify({"error": "Authentication failed"}), 500
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
