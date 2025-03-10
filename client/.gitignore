@@ -41,3 +41,6 @@ dist/
 # Firebase
 **/firebase_credentials.json
 **/serviceAccountKey.json
+
+.env
+firebase_credentials.json
