@@ -27,7 +27,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -86,9 +86,12 @@ interface TaskList {
 export default function PageLayout() {
   const { logout, user } = useAuth();
   const navigate = useNavigate();
+  const { listId } = useParams();
+  const location = useLocation();
   const [activeTeam, setActiveTeam] = useState("SimpleTask");
   const [taskLists, setTaskLists] = useState<TaskList[]>([]);
   const [currentList, setCurrentList] = useState<string | null>(null);
+  const [currentListTitle, setCurrentListTitle] = useState<string | null>(null);
   const [draggedItem, setDraggedItem] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
@@ -127,6 +130,33 @@ export default function PageLayout() {
     fetchTaskLists();
   }, []);
 
+  // Update current list and title based on URL parameters
+  useEffect(() => {
+    if (listId) {
+      setCurrentList(listId);
+      
+      // Find the title for this list id
+      const findListTitle = (lists: TaskList[]): string | null => {
+        for (const list of lists) {
+          if (list.id === listId) {
+            return list.title;
+          }
+          if (list.children && list.children.length) {
+            const childTitle = findListTitle(list.children);
+            if (childTitle) return childTitle;
+          }
+        }
+        return null;
+      };
+      
+      const title = findListTitle(taskLists);
+      setCurrentListTitle(title);
+    } else {
+      // If not on a task list page
+      setCurrentListTitle(null);
+    }
+  }, [listId, taskLists]);
+
   // Focus input when editing starts
   useEffect(() => {
     if (editingListId && inputRef.current) {
@@ -135,40 +165,39 @@ export default function PageLayout() {
   }, [editingListId]);
   
   // Function to handle creating a new task list
-  // Function to handle creating a new task list
-const handleCreateTaskList = async (title: string, isFolder: boolean = false) => {
-  try {
-    // Add console logging to debug
-    console.log("Creating task list:", { title, isFolder });
-    
-    const response = await api.post('task-lists', {
-      title,
-      is_folder: isFolder
-    });
-    
-    console.log("Task list creation response:", response);
-    
-    // Make sure we have a valid ID
-    if (!response || !response.id) {
-      throw new Error("Invalid response from server when creating task list");
+  const handleCreateTaskList = async (title: string, isFolder: boolean = false) => {
+    try {
+      // Add console logging to debug
+      console.log("Creating task list:", { title, isFolder });
+      
+      const response = await api.post('task-lists', {
+        title,
+        is_folder: isFolder
+      });
+      
+      console.log("Task list creation response:", response);
+      
+      // Make sure we have a valid ID
+      if (!response || !response.id) {
+        throw new Error("Invalid response from server when creating task list");
+      }
+      
+      const newList = {
+        id: response.id.toString(),
+        title: response.title,
+        icon: response.is_folder ? Folder : ListTodo,
+        url: `/tasks/${response.id}`,
+        isFolder: response.is_folder,
+        children: []
+      };
+      
+      setTaskLists(prevLists => [...prevLists, newList]);
+      return newList;
+    } catch (error) {
+      console.error("Error creating task list:", error);
+      throw error;
     }
-    
-    const newList = {
-      id: response.id.toString(),
-      title: response.title,
-      icon: response.is_folder ? Folder : ListTodo,
-      url: `/tasks/${response.id}`,
-      isFolder: response.is_folder,
-      children: []
-    };
-    
-    setTaskLists(prevLists => [...prevLists, newList]);
-    return newList;
-  } catch (error) {
-    console.error("Error creating task list:", error);
-    throw error;
-  }
-};
+  };
 
   // Function to start renaming a task list
   const startRenaming = (list: TaskList, e: React.MouseEvent) => {
@@ -216,6 +245,11 @@ const handleCreateTaskList = async (title: string, isFolder: boolean = false) =>
           return list;
         });
       });
+      
+      // Update current list title if we're renaming the current list
+      if (editingListId === currentList) {
+        setCurrentListTitle(editingTitle);
+      }
     } catch (error) {
       console.error("Error renaming task list:", error);
     } finally {
@@ -345,7 +379,10 @@ const handleCreateTaskList = async (title: string, isFolder: boolean = false) =>
     try {
       await api.delete(`task-lists/${id}`);
       setTaskLists(taskLists.filter(t => t.id !== id));
-      if (currentList === id) setCurrentList(null);
+      if (currentList === id) {
+        setCurrentList(null);
+        setCurrentListTitle(null);
+      }
     } catch (error) {
       console.error("Error deleting task list:", error);
     }
@@ -657,7 +694,10 @@ const handleCreateTaskList = async (title: string, isFolder: boolean = false) =>
                 </BreadcrumbItem>
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbItem>
-                  <BreadcrumbPage>Dashboard</BreadcrumbPage>
+                  <BreadcrumbPage>
+                    {/* Show task list name instead of "Dashboard" when viewing a task */}
+                    {currentListTitle || (location.pathname === "/" ? "Dashboard" : "Task List")}
+                  </BreadcrumbPage>
                 </BreadcrumbItem>
               </BreadcrumbList>
             </Breadcrumb>
