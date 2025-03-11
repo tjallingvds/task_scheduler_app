@@ -4,6 +4,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { 
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue 
+  } from "@/components/ui/select";
+import { 
   PlusCircle, 
   Trash2, 
   AlignLeft, 
@@ -14,7 +21,8 @@ import {
   ChevronDown, 
   Calendar,
   Tag,
-  Edit3
+  Edit3,
+  X
 } from "lucide-react";
 import api from "@/services/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
@@ -43,7 +51,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-  
+
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
 // Task interface with support for subtasks and indentation
 interface Task {
   id: number;
@@ -87,6 +104,18 @@ const TaskPage = () => {
   const editInputRef = useRef<HTMLInputElement>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [taskToDelete, setTaskToDelete] = useState<{id: number, hasChildren: boolean} | null>(null);
+  const [newTaskPriority, setNewTaskPriority] = useState<'low' | 'medium' | 'high'>('medium');
+  
+  // New state variables for tags and due date functionality
+  const [showDueDateDialog, setShowDueDateDialog] = useState(false);
+  const [showTagsDialog, setShowTagsDialog] = useState(false);
+  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
+  const [selectedDueDate, setSelectedDueDate] = useState<string>("");
+  const [newTag, setNewTag] = useState<string>("");
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [availableTags, setAvailableTags] = useState<string[]>([
+    "Important", "Personal", "Work", "Home", "Shopping", "Urgent", "Low Priority"
+  ]);
   
   // Format date helper function (since date-fns may not be installed)
   const formatDate = (dateString: string): string => {
@@ -96,6 +125,13 @@ const TaskPage = () => {
       month: 'short', 
       day: 'numeric' 
     });
+  };
+
+  // Format date for input field
+  const formatDateForInput = (dateString?: string | null): string => {
+    if (!dateString) return "";
+    const date = new Date(dateString);
+    return date.toISOString().split('T')[0]; // Returns YYYY-MM-DD format
   };
 
   // Flatten the task hierarchy into a display-ready array
@@ -178,6 +214,7 @@ const TaskPage = () => {
           level: task.level || 0,
           expanded: true,
           priority: task.priority || 'medium',
+          tags: task.tags || [],
           children: [],
         }));
         
@@ -461,14 +498,16 @@ const TaskPage = () => {
         title: newTaskTitle, 
         completed: false, 
         parent_id: parentId || null,
-        level: parentId ? 1 : 0
+        level: parentId ? 1 : 0,
+        priority: newTaskPriority
       });
       
       const newTask = await api.post(`task-lists/${listId}/tasks`, {
         title: newTaskTitle,
         completed: false,
         parent_id: parentId || null,
-        level: parentId ? 1 : 0
+        level: parentId ? 1 : 0,
+        priority: newTaskPriority
       });
       
       console.log("Task creation response:", newTask);
@@ -483,7 +522,8 @@ const TaskPage = () => {
         ...newTask,
         expanded: true,
         children: [],
-        level: newTask.level || (parentId ? 1 : 0)
+        level: newTask.level || (parentId ? 1 : 0),
+        priority: newTask.priority || newTaskPriority
       };
       
       if (parentId) {
@@ -519,8 +559,9 @@ const TaskPage = () => {
         setAllTasks(prev => [...prev, taskWithDefaults]);
       }
       
-      // Reset the input field
+      // Reset the input field and priority
       setNewTaskTitle("");
+      setNewTaskPriority("medium"); // Reset priority to default
     } catch (error) {
       console.error("Error adding task:", error);
     }
@@ -784,6 +825,134 @@ const TaskPage = () => {
     }
   };
   
+  // NEW FUNCTIONS FOR DUE DATE AND TAGS
+  
+  // Open the due date dialog for a specific task
+  const handleOpenDueDateDialog = (taskId: number) => {
+    const task = flattenedTasks.find(t => t.id === taskId);
+    if (task) {
+      setSelectedTaskId(taskId);
+      setSelectedDueDate(formatDateForInput(task.due_date));
+      setShowDueDateDialog(true);
+    }
+  };
+  
+  // Save the due date for a task
+  const handleSaveDueDate = async () => {
+    if (!selectedTaskId) return;
+    
+    try {
+      await api.put(`tasks/${selectedTaskId}`, {
+        due_date: selectedDueDate || null
+      });
+      
+      // Update task in state
+      setAllTasks(prev => {
+        // Update task recursively
+        const updateTask = (tasks: Task[]): Task[] => {
+          return tasks.map(task => {
+            if (task.id === selectedTaskId) {
+              return { ...task, due_date: selectedDueDate || null };
+            }
+            if (task.children && task.children.length > 0) {
+              return {
+                ...task,
+                children: updateTask(task.children)
+              };
+            }
+            return task;
+          });
+        };
+        
+        return updateTask(prev);
+      });
+    } catch (error) {
+      console.error("Error updating task due date:", error);
+    } finally {
+      setShowDueDateDialog(false);
+      setSelectedTaskId(null);
+    }
+  };
+  
+  // Open the tags dialog for a specific task
+  const handleOpenTagsDialog = (taskId: number) => {
+    const task = flattenedTasks.find(t => t.id === taskId);
+    if (task) {
+      setSelectedTaskId(taskId);
+      setSelectedTags(task.tags || []);
+      setShowTagsDialog(true);
+    }
+  };
+  
+  // Add a new tag to the selected task
+  const handleAddTag = () => {
+    if (!newTag.trim()) return;
+    
+    // Check if the tag is already in the list
+    if (!selectedTags.includes(newTag) && !availableTags.includes(newTag)) {
+      // Add to available tags if it's a new tag
+      setAvailableTags(prev => [...prev, newTag]);
+    }
+    
+    // Add to selected tags if not already there
+    if (!selectedTags.includes(newTag)) {
+      setSelectedTags(prev => [...prev, newTag]);
+    }
+    
+    setNewTag("");
+  };
+  
+  // Toggle a tag selection
+  const handleToggleTag = (tag: string) => {
+    if (selectedTags.includes(tag)) {
+      setSelectedTags(prev => prev.filter(t => t !== tag));
+    } else {
+      setSelectedTags(prev => [...prev, tag]);
+    }
+  };
+  
+  // Remove a tag from the selected task
+  const handleRemoveTag = (tag: string) => {
+    setSelectedTags(prev => prev.filter(t => t !== tag));
+  };
+  
+  // Save the tags for a task
+  const handleSaveTags = async () => {
+    if (!selectedTaskId) return;
+    
+    try {
+      await api.put(`tasks/${selectedTaskId}`, {
+        tags: selectedTags
+      });
+      
+      // Update task in state
+      setAllTasks(prev => {
+        // Update task recursively
+        const updateTask = (tasks: Task[]): Task[] => {
+          return tasks.map(task => {
+            if (task.id === selectedTaskId) {
+              return { ...task, tags: selectedTags };
+            }
+            if (task.children && task.children.length > 0) {
+              return {
+                ...task,
+                children: updateTask(task.children)
+              };
+            }
+            return task;
+          });
+        };
+        
+        return updateTask(prev);
+      });
+    } catch (error) {
+      console.error("Error updating task tags:", error);
+    } finally {
+      setShowTagsDialog(false);
+      setSelectedTaskId(null);
+    }
+  };
+  
   // Get drop highlight class - now with right side highlight for subtasks
   const getDropHighlightClass = (taskId: number) => {
     if (dropTarget !== taskId || draggedTask === taskId) return '';
@@ -894,19 +1063,51 @@ const TaskPage = () => {
           </div>
           <Separator />
           <div className="p-6">
+
             <form onSubmit={(e) => handleAddTask(e)} className="flex space-x-2 mb-6">
-              <Input
-                placeholder="Add a new task..."
-                value={newTaskTitle}
-                onChange={(e) => setNewTaskTitle(e.target.value)}
-                className="flex-1"
-              />
-              <Button type="submit">
-                <PlusCircle className="h-4 w-4 mr-2" />
-                Add Task
-              </Button>
+                <Input
+                    placeholder="Add a new task..."
+                    value={newTaskTitle}
+                    onChange={(e) => setNewTaskTitle(e.target.value)}
+                    className="flex-1"
+                />
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="w-[120px]">
+                        {newTaskPriority.charAt(0).toUpperCase() + newTaskPriority.slice(1)}
+                        <ChevronDown className="ml-2 h-4 w-4" />
+                    </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent>
+                    <DropdownMenuLabel>Priority</DropdownMenuLabel>
+                    <DropdownMenuItem 
+                        onClick={() => setNewTaskPriority('low')}
+                        className={newTaskPriority === 'low' ? 'bg-accent' : ''}
+                    >
+                        <Badge className={getPriorityClass('low') + " mr-2"}>Low</Badge>
+                        Low Priority
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                        onClick={() => setNewTaskPriority('medium')}
+                        className={newTaskPriority === 'medium' ? 'bg-accent' : ''}
+                    >
+                        <Badge className={getPriorityClass('medium') + " mr-2"}>Medium</Badge>
+                        Medium Priority
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                        onClick={() => setNewTaskPriority('high')}
+                        className={newTaskPriority === 'high' ? 'bg-accent' : ''}
+                    >
+                        <Badge className={getPriorityClass('high') + " mr-2"}>High</Badge>
+                        High Priority
+                    </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+                <Button type="submit">
+                    <PlusCircle className="h-4 w-4 mr-2" />
+                    Add Task
+                </Button>
             </form>
-            
             <ScrollArea className="h-[500px] pr-4">
               <div className="space-y-2">
                 {filteredTasks.length === 0 ? (
@@ -991,7 +1192,7 @@ const TaskPage = () => {
                         )}
                         
                         {/* Task details/metadata */}
-                        <div className="flex items-center space-x-2 mt-1 text-xs text-muted-foreground">
+                        <div className="flex items-center flex-wrap gap-2 mt-1 text-xs text-muted-foreground">
                           {task.priority && (
                             <Badge variant="outline" className={cn("text-xs px-1 py-0", getPriorityClass(task.priority))}>
                               {task.priority}
@@ -1012,6 +1213,18 @@ const TaskPage = () => {
                               {formatDate(task.due_date)}
                             </Badge>
                           )}
+                          
+                          {/* Display tags */}
+                          {task.tags && task.tags.length > 0 && task.tags.map((tag, index) => (
+                            <Badge 
+                              key={`${task.id}-tag-${index}`}
+                              variant="secondary" 
+                              className="text-xs px-1 py-0 bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300"
+                            >
+                              <Tag className="h-3 w-3 mr-1" />
+                              {tag}
+                            </Badge>
+                          ))}
                           
                           {task.description && (
                             <TooltipProvider>
@@ -1069,6 +1282,7 @@ const TaskPage = () => {
                               onClick={(e) => {
                                 e.preventDefault();
                                 setNewTaskTitle("");
+                                setNewTaskPriority("medium");
                                 handleAddTask(e, task.id);
                               }}
                             >
@@ -1076,11 +1290,11 @@ const TaskPage = () => {
                               Add Subtask
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleOpenDueDateDialog(task.id)}>
                               <Calendar className="h-4 w-4 mr-2" />
                               Set Due Date
                             </DropdownMenuItem>
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleOpenTagsDialog(task.id)}>
                               <Tag className="h-4 w-4 mr-2" />
                               Add Tags
                             </DropdownMenuItem>
@@ -1170,6 +1384,7 @@ const TaskPage = () => {
             <li>Click the "Add Subtask" option in the dropdown menu to add nested tasks</li>
             <li>Tasks can be nested up to 10 levels deep for complex hierarchies</li>
             <li>Use the filters at the bottom to view different task groups</li>
+            <li>Set due dates and add tags to better organize your tasks</li>
           </ul>
         </CardContent>
       </Card>
@@ -1200,6 +1415,135 @@ const TaskPage = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      
+      {/* Due Date Dialog */}
+      <Dialog open={showDueDateDialog} onOpenChange={setShowDueDateDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Set Due Date</DialogTitle>
+            <DialogDescription>
+              Choose a due date for this task.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <label htmlFor="due-date" className="text-right">
+                Due Date
+              </label>
+              <div className="col-span-3">
+                <Input
+                  id="due-date"
+                  type="date"
+                  value={selectedDueDate}
+                  onChange={(e) => setSelectedDueDate(e.target.value)}
+                  className="w-full"
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setSelectedDueDate("");
+                handleSaveDueDate();
+              }}
+            >
+              Clear Date
+            </Button>
+            <Button onClick={handleSaveDueDate}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Tags Dialog */}
+      <Dialog open={showTagsDialog} onOpenChange={setShowTagsDialog}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Manage Tags</DialogTitle>
+            <DialogDescription>
+              Add or remove tags for this task.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            {/* Current tags */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Current Tags
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {selectedTags.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No tags added yet</p>
+                ) : (
+                  selectedTags.map((tag, index) => (
+                    <Badge 
+                      key={`selected-tag-${index}`}
+                      variant="secondary"
+                      className="flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300"
+                    >
+                      {tag}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-4 w-4 ml-1 p-0"
+                        onClick={() => handleRemoveTag(tag)}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </Badge>
+                  ))
+                )}
+              </div>
+            </div>
+            
+            {/* Add new tag */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Add New Tag
+              </label>
+              <div className="flex space-x-2">
+                <Input
+                  value={newTag}
+                  onChange={(e) => setNewTag(e.target.value)}
+                  placeholder="Enter tag name"
+                  className="flex-1"
+                />
+                <Button onClick={handleAddTag}>
+                  Add
+                </Button>
+              </div>
+            </div>
+            
+            {/* Suggested tags */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Suggested Tags
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {availableTags
+                  .filter(tag => !selectedTags.includes(tag))
+                  .map((tag, index) => (
+                    <Badge
+                      key={`suggested-tag-${index}`}
+                      variant="outline"
+                      className="cursor-pointer hover:bg-accent"
+                      onClick={() => handleToggleTag(tag)}
+                    >
+                      {tag}
+                    </Badge>
+                  ))
+                }
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowTagsDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveTags}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

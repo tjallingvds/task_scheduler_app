@@ -11,6 +11,9 @@ from firebase_admin import credentials, initialize_app, auth
 import firebase_admin
 from dotenv import load_dotenv
 import os
+from datetime import datetime, timedelta
+from sqlalchemy import func, and_
+
 
 # Load environment variables from .env file
 load_dotenv()
@@ -567,5 +570,158 @@ def firebase_login():  # Changed method name to be unique
         print(f"Unexpected Firebase login error: {str(e)}")
         traceback.print_exc()  # Print full traceback for debugging
         return jsonify({"error": "Authentication failed"}), 500
+    
+# Add these routes to your app.py file
+@app.route('/api/stats/tasks/weekly', methods=['GET'])
+@login_required
+def get_weekly_task_stats():
+    # Get date 7 days ago from now
+    start_date = datetime.utcnow() - timedelta(days=6)
+    
+    # Format start date to include only the date part, not time
+    start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Get all task lists for the current user
+    user_task_lists = TaskList.query.filter_by(user_id=current_user.id).all()
+    task_list_ids = [list.id for list in user_task_lists]
+    
+    # Generate list of dates for the past 7 days
+    dates = []
+    for i in range(7):
+        date = start_date + timedelta(days=i)
+        dates.append(date.strftime('%Y-%m-%d'))
+    
+    result = []
+    
+    for date_str in dates:
+        date = datetime.strptime(date_str, '%Y-%m-%d')
+        next_date = date + timedelta(days=1)
+        
+        # Count completed tasks for this date across all user's task lists
+        completed_count = Task.query.filter(
+            Task.task_list_id.in_(task_list_ids),
+            Task.completed == True,
+            Task.updated_at >= date,
+            Task.updated_at < next_date
+        ).count()
+        
+        # Count created tasks for this date
+        created_count = Task.query.filter(
+            Task.task_list_id.in_(task_list_ids),
+            Task.created_at >= date,
+            Task.created_at < next_date
+        ).count()
+        
+        result.append({
+            "date": date_str,
+            "completed_count": completed_count,
+            "created_count": created_count
+        })
+    
+    return jsonify(result), 200
+
+@app.route('/api/stats/tasks/monthly', methods=['GET'])
+@login_required
+def get_monthly_task_stats():
+    # Get date 30 days ago from now
+    start_date = datetime.utcnow() - timedelta(days=29)
+    
+    # Format start date to include only the date part, not time
+    start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Get all task lists for the current user
+    user_task_lists = TaskList.query.filter_by(user_id=current_user.id).all()
+    task_list_ids = [list.id for list in user_task_lists]
+    
+    # Generate list of dates for the past 30 days
+    dates = []
+    for i in range(30):
+        date = start_date + timedelta(days=i)
+        dates.append(date.strftime('%Y-%m-%d'))
+    
+    result = []
+    
+    for date_str in dates:
+        date = datetime.strptime(date_str, '%Y-%m-%d')
+        next_date = date + timedelta(days=1)
+        
+        # Count completed tasks for this date across all user's task lists
+        completed_count = Task.query.filter(
+            Task.task_list_id.in_(task_list_ids),
+            Task.completed == True,
+            Task.updated_at >= date,
+            Task.updated_at < next_date
+        ).count()
+        
+        # Count created tasks for this date
+        created_count = Task.query.filter(
+            Task.task_list_id.in_(task_list_ids),
+            Task.created_at >= date,
+            Task.created_at < next_date
+        ).count()
+        
+        result.append({
+            "date": date_str,
+            "completed_count": completed_count,
+            "created_count": created_count
+        })
+    
+    return jsonify(result), 200
+
+@app.route('/api/stats/tasks/high-priority', methods=['GET'])
+@login_required
+def get_high_priority_tasks():
+    # Get all task lists for the current user
+    user_task_lists = TaskList.query.filter_by(user_id=current_user.id).all()
+    task_list_ids = [list.id for list in user_task_lists]
+    
+    # Get all high priority tasks that aren't completed
+    high_priority_tasks = Task.query.filter(
+        Task.task_list_id.in_(task_list_ids),
+        Task.priority == 'high',
+        Task.completed == False
+    ).all()
+    
+    # Format the results
+    result = []
+    for task in high_priority_tasks:
+        # Get task list title
+        task_list = TaskList.query.get(task.task_list_id)
+        
+        # Get subtasks
+        subtasks = Task.query.filter_by(parent_id=task.id).all()
+        subtasks_data = []
+        
+        for subtask in subtasks:
+            subtask_data = {
+                "id": subtask.id,
+                "title": subtask.title,
+                "completed": subtask.completed,
+                "priority": subtask.priority,
+                "due_date": subtask.due_date.isoformat() if subtask.due_date else None,
+                "level": subtask.level,
+                "created_at": subtask.created_at.isoformat(),
+                "updated_at": subtask.updated_at.isoformat()
+            }
+            subtasks_data.append(subtask_data)
+        
+        task_data = {
+            "id": task.id,
+            "title": task.title,
+            "completed": task.completed,
+            "parent_id": task.parent_id,
+            "level": task.level,
+            "priority": task.priority,
+            "due_date": task.due_date.isoformat() if task.due_date else None,
+            "created_at": task.created_at.isoformat(),
+            "updated_at": task.updated_at.isoformat(),
+            "task_list_id": task.task_list_id,
+            "task_list_title": task_list.title if task_list else "Unknown List",
+            "children": subtasks_data
+        }
+        result.append(task_data)
+    
+    return jsonify(result), 200
+
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
