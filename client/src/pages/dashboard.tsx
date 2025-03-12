@@ -1,6 +1,3 @@
-// First, install these packages:
-// npm install chart.js react-chartjs-2
-
 import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
@@ -104,6 +101,7 @@ interface Task {
   expanded?: boolean;
   task_list_id: number;
   task_list_title?: string;
+  reason?: 'high-priority' | 'overdue' | 'upcoming'; // Add reason field
 }
 
 // Daily stats interface
@@ -213,6 +211,8 @@ export default function Dashboard() {
     if (!dueDate) return null;
     
     const today = new Date();
+    today.setHours(0, 0, 0, 0); // Reset time to start of day
+    
     const due = new Date(dueDate);
     
     if (due < today) return 'overdue';
@@ -244,7 +244,15 @@ export default function Dashboard() {
     try {
       const allLists = await fetchAllTaskLists();
       let allTasks: Task[] = [];
-      let allHighPriorityTasks: Task[] = [];
+      let allPriorityTasks: Task[] = [];
+      
+      // Get current date for date comparisons
+      const today = new Date();
+      today.setHours(0, 0, 0, 0); // Reset time to start of day
+      
+      // Calculate next week's date
+      const nextWeek = new Date(today);
+      nextWeek.setDate(today.getDate() + 7);
       
       // Fetch tasks from each list
       for (const list of allLists) {
@@ -259,33 +267,52 @@ export default function Dashboard() {
           
           allTasks = [...allTasks, ...tasksWithListTitle];
           
-          // Find high priority root tasks for this list
-          const highPriorityRootTasks = tasksWithListTitle
-            .filter((task: Task) => task.priority === 'high' && !task.parent_id)
+          // Find high priority tasks for this list (not completed)
+          const highPriorityTasks = tasksWithListTitle
+            .filter((task: Task) => task.priority === 'high' && !task.completed)
             .map((task: Task) => ({
               ...task,
               expanded: false,
+              reason: 'high-priority' as const,
               children: tasksWithListTitle.filter((t: Task) => t.parent_id === task.id)
             }));
           
-          // Also find high priority subtasks whose parents are not high priority
-          const highPrioritySubtasks = tasksWithListTitle
-            .filter((task: Task) => task.priority === 'high' && task.parent_id !== null)
-            .filter((subtask: Task) => {
-              // Only include if the parent task is not already high priority
-              const parentTask = tasksWithListTitle.find(t => t.id === subtask.parent_id);
-              return !parentTask || parentTask.priority !== 'high';
+          // Find overdue tasks (not completed and not already high priority)
+          const overdueTasks = tasksWithListTitle
+            .filter((task: Task) => {
+              if (!task.due_date || task.completed) return false;
+              if (task.priority === 'high') return false; // Skip if already high priority
+              const dueDate = new Date(task.due_date);
+              return dueDate < today;
             })
             .map((task: Task) => ({
               ...task,
               expanded: false,
+              reason: 'overdue' as const,
               children: tasksWithListTitle.filter((t: Task) => t.parent_id === task.id)
             }));
           
-          allHighPriorityTasks = [
-            ...allHighPriorityTasks, 
-            ...highPriorityRootTasks,
-            ...highPrioritySubtasks
+          // Find upcoming tasks (due within 7 days, not completed, not high priority, not overdue)
+          const upcomingTasks = tasksWithListTitle
+            .filter((task: Task) => {
+              if (!task.due_date || task.completed) return false;
+              if (task.priority === 'high') return false; // Skip if already high priority
+              const dueDate = new Date(task.due_date);
+              return dueDate >= today && dueDate <= nextWeek;
+            })
+            .map((task: Task) => ({
+              ...task,
+              expanded: false,
+              reason: 'upcoming' as const,
+              children: tasksWithListTitle.filter((t: Task) => t.parent_id === task.id)
+            }));
+          
+          // Add all priority tasks to our collection
+          allPriorityTasks = [
+            ...allPriorityTasks,
+            ...highPriorityTasks,
+            ...overdueTasks,
+            ...upcomingTasks
           ];
         } catch (error) {
           console.error(`Error fetching tasks for list ${list.id}:`, error);
@@ -293,17 +320,13 @@ export default function Dashboard() {
       }
       
       // Update state with all collected tasks
-      setHighPriorityTasks(allHighPriorityTasks);
+      setHighPriorityTasks(allPriorityTasks);
       
-      // Calculate task counts including all subtasks
+      // Calculate task counts
       setTotalTasksCount(allTasks.length);
       setCompletedTasksCount(allTasks.filter(t => t.completed).length);
       
       // Calculate upcoming tasks (due within 7 days)
-      const today = new Date();
-      const nextWeek = new Date();
-      nextWeek.setDate(today.getDate() + 7);
-      
       const upcoming = allTasks.filter(t => {
         if (!t.due_date || t.completed) return false;
         const dueDate = new Date(t.due_date);
@@ -520,21 +543,21 @@ export default function Dashboard() {
         </CardContent>
       </Card>
       
-      {/* High Priority Tasks */}
+      {/* Priority Tasks Section - Updated to include all priority types */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center">
             <AlertTriangle className="mr-2 h-5 w-5 text-red-500" />
-            High Priority Tasks
+            Priority & Time-Sensitive Tasks
           </CardTitle>
           <CardDescription>
-            Tasks marked as high priority across all lists
+            High priority tasks, overdue tasks, and tasks due in the coming week
           </CardDescription>
         </CardHeader>
         <CardContent>
           {highPriorityTasks.length === 0 ? (
             <div className="py-8 text-center text-muted-foreground">
-              No high priority tasks found
+              No priority or time-sensitive tasks found
             </div>
           ) : (
             <ScrollArea className="h-[400px] pr-4">
@@ -545,7 +568,10 @@ export default function Dashboard() {
                       className={cn(
                         "flex items-center rounded-lg border p-3 transition-all",
                         "hover:bg-muted/30 relative group",
-                        task.completed ? "bg-muted/10" : ""
+                        task.completed ? "bg-muted/10" : "",
+                        task.reason === 'overdue' ? "border-red-200" : 
+                        task.reason === 'upcoming' ? "border-amber-200" : 
+                        task.priority === 'high' ? "border-red-200" : ""
                       )}
                     >
                       {/* Checkbox */}
@@ -587,9 +613,31 @@ export default function Dashboard() {
                         
                         {/* Task metadata */}
                         <div className="flex items-center space-x-2 mt-1 text-xs text-muted-foreground">
-                          <Badge variant="outline" className={cn("text-xs px-1 py-0", getPriorityClass(task.priority))}>
-                            {task.priority}
-                          </Badge>
+                          {/* Reason badge */}
+                          {task.reason === 'high-priority' && (
+                            <Badge variant="outline" className="text-xs px-1 py-0 text-red-500 border-red-200">
+                              High Priority
+                            </Badge>
+                          )}
+                          
+                          {task.reason === 'overdue' && (
+                            <Badge variant="outline" className="text-xs px-1 py-0 text-red-500 border-red-200">
+                              Overdue
+                            </Badge>
+                          )}
+                          
+                          {task.reason === 'upcoming' && (
+                            <Badge variant="outline" className="text-xs px-1 py-0 text-amber-500 border-amber-200">
+                              Due Soon
+                            </Badge>
+                          )}
+                          
+                          {/* Only show priority badge if not already indicated by high-priority reason */}
+                          {task.reason !== 'high-priority' && task.priority && (
+                            <Badge variant="outline" className={cn("text-xs px-1 py-0", getPriorityClass(task.priority))}>
+                              {task.priority}
+                            </Badge>
+                          )}
                           
                           {task.task_list_title && (
                             <Badge variant="outline" className="text-xs px-1 py-0">

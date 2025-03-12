@@ -872,10 +872,14 @@ const TaskPage = () => {
   };
   
   // Save the due date for a task
+  // Updated handleSaveDueDate function
   const handleSaveDueDate = async () => {
     if (!selectedTaskId) return;
     
     try {
+      // Log what we're sending to the API
+      console.log(`Setting due date for task ${selectedTaskId} to ${selectedDueDate || null}`);
+      
       await api.put(`tasks/${selectedTaskId}`, {
         due_date: selectedDueDate || null
       });
@@ -886,6 +890,7 @@ const TaskPage = () => {
         const updateTask = (tasks: Task[]): Task[] => {
           return tasks.map(task => {
             if (task.id === selectedTaskId) {
+              console.log(`Updating task ${task.id} due_date to`, selectedDueDate || null);
               return { ...task, due_date: selectedDueDate || null };
             }
             if (task.children && task.children.length > 0) {

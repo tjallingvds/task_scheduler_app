@@ -423,7 +423,23 @@ def update_task(task_id):
         task.description = data['description']
     
     if hasattr(task, 'due_date') and 'due_date' in data:
-        task.due_date = data['due_date']
+        # Add proper datetime parsing with error handling
+        if data['due_date']:
+            try:
+                # Try parsing as ISO format
+                task.due_date = datetime.fromisoformat(data['due_date'])
+                print(f"Successfully set due_date to: {task.due_date}")
+            except ValueError:
+                try:
+                    # Try parsing as YYYY-MM-DD format
+                    task.due_date = datetime.strptime(data['due_date'], '%Y-%m-%d')
+                    print(f"Successfully set due_date to: {task.due_date} (using date-only format)")
+                except ValueError:
+                    print(f"Failed to parse due_date: {data['due_date']}")
+                    return jsonify({"error": "Invalid date format"}), 400
+        else:
+            task.due_date = None
+            print("Set due_date to None")
     
     if hasattr(task, 'priority') and 'priority' in data:
         task.priority = data['priority']
