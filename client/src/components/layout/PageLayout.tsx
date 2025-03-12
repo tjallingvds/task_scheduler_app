@@ -814,7 +814,7 @@ export default function PageLayout() {
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate('/profile')}>
                     <User />
                     <span>Profile</span>
                   </DropdownMenuItem>
@@ -845,8 +845,10 @@ export default function PageLayout() {
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbItem>
                   <BreadcrumbPage>
-                    {/* Show task list name instead of "Dashboard" when viewing a task */}
-                    {currentListTitle || (location.pathname === "/" ? "Dashboard" : "Task List")}
+                    {/* Show proper page name based on current location */}
+                    {location.pathname === "/profile" 
+                      ? "Profile" 
+                      : (currentListTitle || (location.pathname === "/" ? "Dashboard" : "Task List"))}
                   </BreadcrumbPage>
                 </BreadcrumbItem>
               </BreadcrumbList>

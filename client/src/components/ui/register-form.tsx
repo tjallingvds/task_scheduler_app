@@ -5,8 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
-import { signInWithGoogle, signInWithGithub } from "@/lib/firebase";
-import { ChromeIcon, GithubIcon } from "lucide-react";
+import { signInWithGoogle } from "@/lib/firebase";
+import { ChromeIcon } from "lucide-react";
 
 export function RegisterForm({
   className,
@@ -41,19 +41,6 @@ export function RegisterForm({
       navigate("/");
     } catch (error) {
       console.error("Google Sign-In Error:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleGitHubSignIn = async () => {
-    try {
-      setIsLoading(true);
-      const user = await signInWithGithub();
-      await loginWithFirebase(user);
-      navigate("/");
-    } catch (error) {
-      console.error("GitHub Sign-In Error:", error);
     } finally {
       setIsLoading(false);
     }
@@ -107,7 +94,8 @@ export function RegisterForm({
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
-        </div><Button 
+        </div>
+        <Button 
           type="submit" 
           className="w-full"
           disabled={isLoading}
@@ -119,26 +107,16 @@ export function RegisterForm({
             Or continue with
           </span>
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          <Button 
-            variant="outline" 
-            type="button" 
-            onClick={handleGoogleSignIn}
-            disabled={isLoading}
-          >
-            <ChromeIcon className="mr-2 h-4 w-4" />
-            Google
-          </Button>
-          <Button 
-            variant="outline" 
-            type="button" 
-            onClick={handleGitHubSignIn}
-            disabled={isLoading}
-          >
-            <GithubIcon className="mr-2 h-4 w-4" />
-            GitHub
-          </Button>
-        </div>
+        <Button 
+          variant="outline" 
+          type="button" 
+          onClick={handleGoogleSignIn}
+          disabled={isLoading}
+          className="w-full"
+        >
+          <ChromeIcon className="mr-2 h-4 w-4" />
+          Google
+        </Button>
       </div>
       <div className="text-center text-sm">
         Already have an account?{" "}
