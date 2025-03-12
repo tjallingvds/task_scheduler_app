@@ -196,3 +196,10 @@ npm run build
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Demo 
+
+See the demo video here:
+```
+https://www.loom.com/share/85006c22ba63459d96683c31a461e5b0?sid=c3fd6b27-4794-4003-af7b-3e04a873d9fe
+```
