@@ -10,13 +10,19 @@ from flask_login import LoginManager, login_user, logout_user, login_required, c
 from firebase_admin import credentials, initialize_app, auth
 import firebase_admin
 from dotenv import load_dotenv
-import os
 from datetime import datetime, timedelta
 from sqlalchemy import func, and_
-
+from werkzeug.utils import secure_filename
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Define allowed extensions for file uploads
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+
+def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def initialize_firebase_app():
     try:
@@ -63,6 +69,13 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-change-in-produ
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+# Setup upload folder
+UPLOAD_FOLDER = 'static/uploads/avatars'
+# Ensure the upload directory exists
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # 5MB max file size
+
 # Initialize Firebase BEFORE creating other app extensions
 initialize_firebase_app()
 
@@ -71,10 +84,6 @@ CORS(app, supports_credentials=True)
 bcrypt = Bcrypt(app)
 db.init_app(app)
 login_manager = LoginManager(app)
-
-@login_manager.user_loader
-def load_user(user_id):
-    return User.query.get(int(user_id))
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -502,7 +511,6 @@ def delete_task(task_id):
     
     return jsonify({"message": "Task and all subtasks deleted successfully"}), 200
 
-# Add this route to your app.py
 @app.route('/api/tasks/<int:task_id>/delete-keep-children', methods=['POST'])
 @login_required
 def delete_task_keep_children(task_id):
@@ -602,7 +610,7 @@ def firebase_login():  # Changed method name to be unique
         traceback.print_exc()  # Print full traceback for debugging
         return jsonify({"error": "Authentication failed"}), 500
     
-# Add these routes to your app.py file
+# Stats routes
 @app.route('/api/stats/tasks/weekly', methods=['GET'])
 @login_required
 def get_weekly_task_stats():
@@ -753,6 +761,124 @@ def get_high_priority_tasks():
         result.append(task_data)
     
     return jsonify(result), 200
+
+# Profile routes
+@app.route('/api/profile', methods=['GET'])
+@login_required
+def get_profile():
+    user_profile = {
+        "id": current_user.id,
+        "email": current_user.email,
+        "name": current_user.name,
+        "avatar": current_user.avatar if hasattr(current_user, 'avatar') else None,
+        "bio": current_user.bio if hasattr(current_user, 'bio') else None,
+        "location": current_user.location if hasattr(current_user, 'location') else None,
+        "website": current_user.website if hasattr(current_user, 'website') else None,
+        "dark_mode": current_user.dark_mode if hasattr(current_user, 'dark_mode') else False,
+        "time_zone": current_user.time_zone if hasattr(current_user, 'time_zone') else "UTC",
+        "notification_email": current_user.notification_email if hasattr(current_user, 'notification_email') else True,
+        "notification_web": current_user.notification_web if hasattr(current_user, 'notification_web') else True,
+        "phone": current_user.phone if hasattr(current_user, 'phone') else None,
+        "job_title": current_user.job_title if hasattr(current_user, 'job_title') else None,
+        "created_at": current_user.created_at.isoformat() if current_user.created_at else None
+    }
+    
+    return jsonify(user_profile), 200
+
+@app.route('/api/profile', methods=['PUT'])
+@login_required
+def update_profile():
+    data = request.json
+    
+    # Update user fields
+    if 'name' in data and hasattr(current_user, 'name'):
+        current_user.name = data['name']
+    
+    if 'bio' in data and hasattr(current_user, 'bio'):
+        current_user.bio = data['bio']
+    
+    if 'location' in data and hasattr(current_user, 'location'):
+        current_user.location = data['location']
+    
+    if 'website' in data and hasattr(current_user, 'website'):
+        current_user.website = data['website']
+    
+    if 'dark_mode' in data and hasattr(current_user, 'dark_mode'):
+        current_user.dark_mode = data['dark_mode']
+    
+    if 'time_zone' in data and hasattr(current_user, 'time_zone'):
+        current_user.time_zone = data['time_zone']
+    
+    if 'notification_email' in data and hasattr(current_user, 'notification_email'):
+        current_user.notification_email = data['notification_email']
+    
+    if 'notification_web' in data and hasattr(current_user, 'notification_web'):
+        current_user.notification_web = data['notification_web']
+    
+    if 'phone' in data and hasattr(current_user, 'phone'):
+        current_user.phone = data['phone']
+    
+    if 'job_title' in data and hasattr(current_user, 'job_title'):
+        current_user.job_title = data['job_title']
+    
+    db.session.commit()
+    
+    return jsonify({"message": "Profile updated successfully"}), 200
+
+@app.route('/api/profile/avatar', methods=['POST'])
+@login_required
+def upload_avatar():
+    # Check if file part exists
+    if 'avatar' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    
+    file = request.files['avatar']
+    
+    # Check if file is selected
+    if file.filename == '':
+        return jsonify({"error": "No file selected"}), 400
+    
+    if file and allowed_file(file.filename):
+        # Create unique filename using user ID and timestamp
+        filename = secure_filename(f"user_{current_user.id}_{int(datetime.utcnow().timestamp())}.{file.filename.rsplit('.', 1)[1].lower()}")
+        
+        # Save file
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        
+        # Update user's avatar field if the column exists
+        if hasattr(current_user, 'avatar'):
+            current_user.avatar = f"/static/uploads/avatars/{filename}"
+            db.session.commit()
+        else:
+            return jsonify({"error": "Avatar field not available on User model"}), 500
+        
+        return jsonify({
+            "message": "Avatar uploaded successfully",
+            "avatar": current_user.avatar
+        }), 200
+    
+    return jsonify({"error": "File type not allowed"}), 400
+
+@app.route('/api/profile/password', methods=['PUT'])
+@login_required
+def update_password():
+    data = request.json
+    
+    # Validate data
+    if not all(k in data for k in ('current_password', 'new_password')):
+        return jsonify({"error": "Missing password fields"}), 400
+    
+    # Verify current password
+    if not bcrypt.check_password_hash(current_user.password, data['current_password']):
+        return jsonify({"error": "Current password is incorrect"}), 401
+    
+    # Hash and update new password
+    hashed_password = bcrypt.generate_password_hash(data['new_password']).decode('utf-8')
+    current_user.password = hashed_password
+    db.session.commit()
+    
+    return jsonify({"message": "Password updated successfully"}), 200
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
