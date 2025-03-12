@@ -134,6 +134,33 @@ const TaskPage = () => {
     return date.toISOString().split('T')[0]; // Returns YYYY-MM-DD format
   };
 
+  // Function to count all subtasks (including nested ones) recursively
+  const countAllSubtasks = (task: Task): number => {
+    let count = 0;
+    
+    if (task.children && task.children.length > 0) {
+      count += task.children.length;
+      
+      // Add children of children recursively
+      task.children.forEach(childTask => {
+        count += countAllSubtasks(childTask);
+      });
+    }
+    
+    return count;
+  };
+  
+  // Count total subtasks in the entire task list (including all nested levels)
+  const countTotalSubtasks = (): number => {
+    let total = 0;
+    
+    allTasks.forEach(task => {
+      total += countAllSubtasks(task);
+    });
+    
+    return total;
+  };
+
   // Flatten the task hierarchy into a display-ready array
   const flattenTasksWithLevels = (tasks: Task[]): Task[] => {
     const result: Task[] = [];
@@ -1278,10 +1305,11 @@ const TaskPage = () => {
                             </TooltipProvider>
                           )}
                           
+                          {/* Show total subtasks with all nested levels */}
                           {task.children && task.children.length > 0 && (
                             <span className="flex items-center gap-1">
                               <ChevronDown className="h-3 w-3" />
-                              {task.children.length} subtask{task.children.length > 1 ? 's' : ''}
+                              {countAllSubtasks(task)} subtask{countAllSubtasks(task) > 1 ? 's' : ''}
                             </span>
                           )}
                         </div>
@@ -1403,29 +1431,10 @@ const TaskPage = () => {
             <div className="space-y-2">
               <h3 className="text-sm font-medium">Subtasks</h3>
               <p className="text-sm text-muted-foreground">
-                {flattenedTasks.filter(t => t.parent_id !== null).length} nested tasks
+                {countTotalSubtasks()} nested tasks
               </p>
             </div>
           </div>
-        </CardContent>
-      </Card>
-      
-      {/* Instructions card */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Task Management Instructions</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ul className="list-disc pl-6 space-y-2 text-sm text-muted-foreground">
-            <li>Drag and drop tasks to reorder them</li>
-            <li>Drag a task to the right half of another task to make it a subtask</li>
-            <li>Drag a task to a different list in the sidebar to move it</li>
-            <li>Click the arrow icon to expand or collapse subtasks</li>
-            <li>Click the "Add Subtask" option in the dropdown menu to add nested tasks</li>
-            <li>Tasks can be nested up to 10 levels deep for complex hierarchies</li>
-            <li>Use the filters at the bottom to view different task groups</li>
-            <li>Set due dates and add tags to better organize your tasks</li>
-          </ul>
         </CardContent>
       </Card>
       
