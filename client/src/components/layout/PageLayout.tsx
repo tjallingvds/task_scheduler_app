@@ -14,6 +14,7 @@ import {
   Forward,
   Frame,
   GalleryVerticalEnd,
+  Home,
   ListTodo,
   LogOut,
   Map,
@@ -80,6 +81,7 @@ interface TaskList {
   url: string;
   children?: TaskList[]; // Added to support nested folders
   isFolder?: boolean;
+  parentId?: string; // Added to track parent folders
 }
 
 // Main Page Layout
@@ -98,6 +100,35 @@ export default function PageLayout() {
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const [isDraggingTask, setIsDraggingTask] = useState(false);
+  
+  // Listen for task drag operations to provide visual feedback
+  useEffect(() => {
+    const handleDragStart = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes('application/json')) {
+        try {
+          // Try to check the data type without actually reading it (which isn't allowed in dragStart)
+          setIsDraggingTask(true);
+        } catch (error) {
+          // Not our task data
+        }
+      }
+    };
+    
+    const handleDragEnd = () => {
+      setIsDraggingTask(false);
+    };
+    
+    document.addEventListener('dragstart', handleDragStart);
+    document.addEventListener('dragend', handleDragEnd);
+    document.addEventListener('drop', handleDragEnd);
+    
+    return () => {
+      document.removeEventListener('dragstart', handleDragStart);
+      document.removeEventListener('dragend', handleDragEnd);
+      document.removeEventListener('drop', handleDragEnd);
+    };
+  }, []);
   
   // Function to fetch task lists from the backend
   useEffect(() => {
@@ -112,12 +143,14 @@ export default function PageLayout() {
           icon: list.is_folder ? Folder : ListTodo,
           url: `/tasks/${list.id}`,
           isFolder: list.is_folder,
+          parentId: list.parent_id ? list.parent_id.toString() : undefined,
           children: list.is_folder ? list.children.map((child: any) => ({
             id: child.id.toString(),
             title: child.title,
             icon: child.is_folder ? Folder : ListTodo,
             url: `/tasks/${child.id}`,
-            isFolder: child.is_folder
+            isFolder: child.is_folder,
+            parentId: list.id.toString()
           })) : []
         }));
         
@@ -290,7 +323,49 @@ export default function PageLayout() {
     }
   };
   
-  // Function to handle drop - creating a folder
+  // Handle tasks being dropped on task lists
+  const handleTaskDrop = async (e: React.DragEvent, targetTaskListId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Check if this is a task being dropped
+    try {
+      const taskData = JSON.parse(e.dataTransfer.getData('application/json'));
+      
+      if (taskData.type === 'TASK') {
+        // Get task details
+        const { taskId, taskListId } = taskData;
+        
+        // Skip if dropping on the same list
+        if (taskListId === targetTaskListId) {
+          return;
+        }
+        
+        console.log(`Moving task ${taskId} from list ${taskListId} to list ${targetTaskListId}`);
+        
+        // Call API to move the task to the new list
+        await api.put(`tasks/${taskId}`, {
+          task_list_id: parseInt(targetTaskListId)
+        });
+        
+        // If we're currently viewing the target list, refresh it to show the new task
+        if (listId === targetTaskListId) {
+          // You would implement a refresh mechanism here
+          // For example, dispatch an event or call a refreshTasks function
+        }
+        
+        setIsDraggingTask(false);
+        return;
+      }
+    } catch (error) {
+      // Not JSON or not our task data, handle as a regular list drop
+    }
+    
+    // If we get here, it's a regular task list drag and drop operation
+    handleDrop(targetTaskListId);
+  };
+  
+  // Function to handle drop - creating a folder or moving into/out of a folder
   const handleDrop = async (targetId: string) => {
     if (!draggedItem || draggedItem === targetId) {
       setDraggedItem(null);
@@ -298,9 +373,25 @@ export default function PageLayout() {
       return;
     }
     
-    // Find the dragged item and target item
-    const draggedItemData = taskLists.find(item => item.id === draggedItem);
-    const targetItemData = taskLists.find(item => item.id === targetId);
+    // Find the dragged item and target item (could be in nested children)
+    const findItem = (lists: TaskList[], id: string): [TaskList | null, TaskList | null] => {
+      for (const list of lists) {
+        if (list.id === id) {
+          return [list, null]; // Found the item, no parent
+        }
+        if (list.isFolder && list.children) {
+          for (const child of list.children) {
+            if (child.id === id) {
+              return [child, list]; // Found the item in children, return with parent
+            }
+          }
+        }
+      }
+      return [null, null]; // Not found
+    };
+    
+    const [draggedItemData, draggedItemParent] = findItem(taskLists, draggedItem);
+    const [targetItemData, targetItemParent] = findItem(taskLists, targetId);
     
     if (!draggedItemData || !targetItemData) {
       setDraggedItem(null);
@@ -309,28 +400,78 @@ export default function PageLayout() {
     }
     
     try {
-      // If target is already a folder, add to children
+      // If target is a folder, add dragged item to its children
       if (targetItemData.isFolder) {
         // Update in the backend
         await api.put(`task-lists/${draggedItem}`, {
           parent_id: parseInt(targetId)
         });
         
-        // Update in the frontend
-        const updatedLists = taskLists.map(item => {
-          if (item.id === targetId) {
+        // First, remove the dragged item from its current location
+        let updatedLists = [...taskLists];
+        
+        if (draggedItemParent) {
+          // If the item is in a folder, remove it from the folder's children
+          updatedLists = updatedLists.map(list => {
+            if (list.id === draggedItemParent.id) {
+              return {
+                ...list,
+                children: list.children?.filter(child => child.id !== draggedItem) || []
+              };
+            }
+            return list;
+          });
+        } else {
+          // If the item is in the root, remove it from there
+          updatedLists = updatedLists.filter(item => item.id !== draggedItem);
+        }
+        
+        // Then add it to the target folder
+        updatedLists = updatedLists.map(list => {
+          if (list.id === targetId) {
             return {
-              ...item,
-              children: [...(item.children || []), draggedItemData]
+              ...list,
+              children: [...(list.children || []), { 
+                ...draggedItemData, 
+                parentId: targetId 
+              }]
             };
           }
-          return item;
-        }).filter(item => item.id !== draggedItem);
+          return list;
+        });
         
         setTaskLists(updatedLists);
         // Auto-expand the folder after dropping an item into it
         setExpandedFolders(prev => new Set(prev).add(targetId));
-      } else {
+      } 
+      // If the target is not a folder, and dragged item is from a folder, move to root
+      else if (draggedItemParent) {
+        // Update in the backend - remove parent
+        await api.put(`task-lists/${draggedItem}`, {
+          parent_id: null
+        });
+        
+        // Remove from parent's children
+        let updatedLists = taskLists.map(list => {
+          if (list.id === draggedItemParent.id) {
+            return {
+              ...list,
+              children: list.children?.filter(child => child.id !== draggedItem) || []
+            };
+          }
+          return list;
+        });
+        
+        // Add to root
+        updatedLists = [...updatedLists, {
+          ...draggedItemData,
+          parentId: undefined
+        }];
+        
+        setTaskLists(updatedLists);
+      }
+      // If both items are at root, create a new folder with both items
+      else {
         // Create a new folder with both items
         const folderName = "Task Folder";
         const newFolder = await handleCreateTaskList(folderName, true);
@@ -347,7 +488,10 @@ export default function PageLayout() {
         // Update frontend state
         const updatedFolder = {
           ...newFolder,
-          children: [targetItemData, draggedItemData]
+          children: [
+            { ...targetItemData, parentId: newFolder.id },
+            { ...draggedItemData, parentId: newFolder.id }
+          ]
         };
         
         // Remove the two individual items and add the folder
@@ -378,7 +522,26 @@ export default function PageLayout() {
   const handleDeleteTaskList = async (id: string) => {
     try {
       await api.delete(`task-lists/${id}`);
-      setTaskLists(taskLists.filter(t => t.id !== id));
+      
+      // Remove from UI
+      setTaskLists(prev => {
+        // First check if it's in the root
+        if (prev.some(item => item.id === id)) {
+          return prev.filter(item => item.id !== id);
+        }
+        
+        // If not in root, find and remove from parent folder
+        return prev.map(item => {
+          if (item.isFolder && item.children?.some(child => child.id === id)) {
+            return {
+              ...item,
+              children: item.children.filter(child => child.id !== id)
+            };
+          }
+          return item;
+        });
+      });
+      
       if (currentList === id) {
         setCurrentList(null);
         setCurrentListTitle(null);
@@ -423,9 +586,9 @@ export default function PageLayout() {
         ) : (
           <>
             <SidebarMenuButton 
-              className={`${currentList === list.id ? "bg-primary/10" : ""} ${
-                dropTarget === list.id ? "border-2 border-dashed border-primary" : ""
-              }`}
+              className={`${currentList === list.id ? "bg-primary/10" : ""} 
+                ${dropTarget === list.id ? "border-2 border-dashed border-primary" : ""}
+                ${isDraggingTask && !list.isFolder ? "bg-green-100 dark:bg-green-900/20" : ""}`}
               onClick={(e) => {
                 if (list.isFolder) {
                   toggleFolderExpansion(list.id, e);
@@ -435,20 +598,32 @@ export default function PageLayout() {
                 }
               }}
               asChild
-              draggable={!isChild}
-              onDragStart={() => !isChild && handleDragStart(list.id)}
+              draggable={true} // Allow dragging for all items
+              onDragStart={() => handleDragStart(list.id)}
               onDragOver={(e) => {
                 e.preventDefault();
-                !isChild && handleDragOver(list.id);
+                
+                // Check if this is a task being dragged
+                let isTaskDrag = isDraggingTask;
+                
+                // If it's a task being dragged, only highlight non-folder task lists
+                if (isTaskDrag) {
+                  if (!list.isFolder) {
+                    handleDragOver(list.id);
+                  }
+                } else {
+                  // If it's a list being dragged, use the regular handler
+                  handleDragOver(list.id);
+                }
               }}
-              onDragEnd={!isChild ? handleDragEnd : undefined}
+              onDragEnd={handleDragEnd}
               onDrop={(e) => {
                 e.preventDefault();
-                !isChild && handleDrop(list.id);
+                handleTaskDrop(e, list.id);
               }}
             >
               <a href={list.url}>
-                {list.icon && <list.icon className="size-4" />}
+                {list.icon && <list.icon className={`size-4 ${isDraggingTask && !list.isFolder ? 'text-green-600 dark:text-green-400' : ''}`} />}
                 <span>{list.title}</span>
                 {list.isFolder && list.children && list.children.length > 0 && (
                   <>
@@ -549,6 +724,22 @@ export default function PageLayout() {
           </SidebarMenu>
         </SidebarHeader>
         <SidebarContent>
+          {/* Dashboard Button */}
+          <SidebarGroup>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  onClick={() => navigate('/')}
+                  className={`${location.pathname === '/' ? "bg-primary/10" : ""}`}
+                >
+                  <Home className="size-4" />
+                  <span>Dashboard</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroup>
+          
+          {/* Task Lists */}
           <SidebarGroup>
             <SidebarGroupLabel>Task Lists</SidebarGroupLabel>
             <SidebarMenu>

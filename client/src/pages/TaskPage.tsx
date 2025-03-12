@@ -248,11 +248,37 @@ const TaskPage = () => {
     }
   }, [editingTaskId]);
   
-  // Handle drag start with a better drag image
+  // Function to move a task to a different list
+  const moveTaskToList = async (taskId: number, newListId: string) => {
+    try {
+      await api.put(`tasks/${taskId}`, {
+        task_list_id: parseInt(newListId)
+      });
+      
+      // Remove the task from the current view
+      setAllTasks(prev => {
+        const removeTask = (tasks: Task[]): Task[] => {
+          return tasks.filter(task => {
+            if (task.id === taskId) return false;
+            if (task.children && task.children.length > 0) {
+              task.children = removeTask(task.children);
+            }
+            return true;
+          });
+        };
+        
+        return removeTask(prev);
+      });
+    } catch (error) {
+      console.error("Error moving task to another list:", error);
+    }
+  };
+  
+  // Enhanced handleDragStart with cross-component drag support
   const handleDragStart = (taskId: number, e: React.DragEvent) => {
     setDraggedTask(taskId);
     
-    // Make the dragged item look nice
+    // Get the task item details
     const taskItem = flattenedTasks.find(t => t.id === taskId);
     if (taskItem) {
       // Set the drag ghost image (optional - for better visual feedback)
@@ -274,8 +300,16 @@ const TaskPage = () => {
       }, 0);
     }
     
-    // Store the data for the drag operation
-    e.dataTransfer.setData('text/plain', taskId.toString());
+    // Include the task data and type for cross-component drag and drop
+    const taskData = JSON.stringify({
+      type: 'TASK',
+      taskId: taskId,
+      taskListId: listId,
+      title: taskItem?.title || '',
+      completed: taskItem?.completed || false
+    });
+    
+    e.dataTransfer.setData('application/json', taskData);
     e.dataTransfer.effectAllowed = 'move';
   };
   
@@ -1380,6 +1414,7 @@ const TaskPage = () => {
           <ul className="list-disc pl-6 space-y-2 text-sm text-muted-foreground">
             <li>Drag and drop tasks to reorder them</li>
             <li>Drag a task to the right half of another task to make it a subtask</li>
+            <li>Drag a task to a different list in the sidebar to move it</li>
             <li>Click the arrow icon to expand or collapse subtasks</li>
             <li>Click the "Add Subtask" option in the dropdown menu to add nested tasks</li>
             <li>Tasks can be nested up to 10 levels deep for complex hierarchies</li>

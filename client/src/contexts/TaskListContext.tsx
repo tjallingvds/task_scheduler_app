@@ -2,6 +2,20 @@ import React, { createContext, useState, useContext, useEffect } from 'react';
 import api from "@/services/api";
 import { Folder, ListTodo } from "lucide-react";
 
+// Task interface
+interface Task {
+  id: number;
+  title: string;
+  completed: boolean;
+  description?: string;
+  parent_id?: number | null;
+  task_list_id: number;
+  level?: number;
+  priority?: 'low' | 'medium' | 'high';
+  due_date?: string | null;
+  tags?: string[];
+}
+
 // Interface for TaskList
 interface TaskList {
   id: string;
@@ -18,6 +32,8 @@ interface TaskListContextType {
   setTaskLists: React.Dispatch<React.SetStateAction<TaskList[]>>;
   refreshTaskLists: () => Promise<void>;
   isLoading: boolean;
+  moveTaskToList: (taskId: number, targetListId: string) => Promise<boolean>;
+  refreshTasksInList: (listId: string) => Promise<Task[]>;
 }
 
 // Create context with default values
@@ -26,6 +42,8 @@ const TaskListContext = createContext<TaskListContextType>({
   setTaskLists: () => {},
   refreshTaskLists: async () => {},
   isLoading: false,
+  moveTaskToList: async () => false,
+  refreshTasksInList: async () => [],
 });
 
 // Provider component
@@ -62,6 +80,37 @@ export const TaskListProvider: React.FC<{children: React.ReactNode}> = ({ childr
       setIsLoading(false);
     }
   };
+  
+  // Function to move a task to a different list
+  const moveTaskToList = async (taskId: number, targetListId: string): Promise<boolean> => {
+    setIsLoading(true);
+    try {
+      console.log(`Moving task ${taskId} to list ${targetListId}`);
+      
+      // Call the API to update the task's list
+      await api.put(`tasks/${taskId}`, {
+        task_list_id: parseInt(targetListId)
+      });
+      
+      return true;
+    } catch (error) {
+      console.error("Error moving task to list:", error);
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  // Function to refresh tasks in a specific list
+  const refreshTasksInList = async (listId: string): Promise<Task[]> => {
+    try {
+      const tasks = await api.get(`task-lists/${listId}/tasks`);
+      return tasks;
+    } catch (error) {
+      console.error(`Error fetching tasks for list ${listId}:`, error);
+      return [];
+    }
+  };
 
   // Fetch task lists on component mount
   useEffect(() => {
@@ -69,7 +118,14 @@ export const TaskListProvider: React.FC<{children: React.ReactNode}> = ({ childr
   }, []);
 
   return (
-    <TaskListContext.Provider value={{ taskLists, setTaskLists, refreshTaskLists, isLoading }}>
+    <TaskListContext.Provider value={{ 
+      taskLists, 
+      setTaskLists, 
+      refreshTaskLists, 
+      isLoading,
+      moveTaskToList,
+      refreshTasksInList
+    }}>
       {children}
     </TaskListContext.Provider>
   );
@@ -77,3 +133,5 @@ export const TaskListProvider: React.FC<{children: React.ReactNode}> = ({ childr
 
 // Custom hook to use the context
 export const useTaskListContext = () => useContext(TaskListContext);
+
+export default TaskListContext;

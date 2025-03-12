@@ -370,6 +370,25 @@ def update_task(task_id):
     if 'completed' in data:
         task.completed = data['completed']
     
+    # Handle task list changes
+    if 'task_list_id' in data:
+        # Verify that the target task list exists and belongs to the current user
+        target_list = TaskList.query.filter_by(id=data['task_list_id'], user_id=current_user.id).first()
+        if not target_list:
+            return jsonify({"error": "Target task list not found or not accessible"}), 404
+        
+        # Update the task's list
+        task.task_list_id = data['task_list_id']
+        
+        # Optionally reset parent_id when moving between lists
+        # If the parent is in a different list, we should reset it
+        if task.parent_id:
+            parent_task = Task.query.get(task.parent_id)
+            if parent_task and parent_task.task_list_id != task.task_list_id:
+                task.parent_id = None
+                if hasattr(task, 'level'):
+                    task.level = 0
+    
     # Handle parent-child relationship
     if 'parent_id' in data:
         if data['parent_id'] is not None:
@@ -420,6 +439,7 @@ def update_task(task_id):
         "title": task.title,
         "completed": task.completed,
         "parent_id": task.parent_id,
+        "task_list_id": task.task_list_id,
         "created_at": task.created_at.isoformat(),
         "updated_at": task.updated_at.isoformat()
     }
@@ -465,11 +485,6 @@ def delete_task(task_id):
     db.session.commit()
     
     return jsonify({"message": "Task and all subtasks deleted successfully"}), 200
-
-# Basic test route
-@app.route('/api/hello', methods=['GET'])
-def hello():
-    return jsonify(message="Hello from Flask!")
 
 # Add this route to your app.py
 @app.route('/api/tasks/<int:task_id>/delete-keep-children', methods=['POST'])
