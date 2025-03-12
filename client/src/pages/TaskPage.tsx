@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
@@ -91,6 +91,7 @@ const TaskPage = () => {
   const { listId } = useParams();
   const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [flattenedTasks, setFlattenedTasks] = useState<Task[]>([]);
+  const [allFlattenedTasks, setAllFlattenedTasks] = useState<Task[]>([]); // All tasks flattened, regardless of expanded state
   const [taskList, setTaskList] = useState<TaskList | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -186,6 +187,31 @@ const TaskPage = () => {
     return result;
   };
   
+  // Flatten all tasks regardless of expanded state (for counting)
+  const flattenAllTasksWithLevels = (tasks: Task[]): Task[] => {
+    const result: Task[] = [];
+    
+    const processTasks = (taskList: Task[], level: number, parentId: number | null = null) => {
+      taskList.forEach(task => {
+        // Add the task with its level and parent information
+        const processedTask = {
+          ...task,
+          level,
+          parent_id: parentId
+        };
+        result.push(processedTask);
+        
+        // Process children recursively regardless of expanded state
+        if (task.children && task.children.length > 0) {
+          processTasks(task.children, level + 1, task.id);
+        }
+      });
+    };
+    
+    processTasks(tasks, 0);
+    return result;
+  };
+  
   // Convert flat array to hierarchical structure
   const buildTaskHierarchy = (tasks: Task[]): Task[] => {
     const taskMap = new Map<number, Task>();
@@ -212,18 +238,18 @@ const TaskPage = () => {
     return rootTasks;
   };
   
-  // Calculate progress
+  // Calculate progress using all tasks (even collapsed ones)
   useEffect(() => {
-    if (flattenedTasks.length === 0) {
+    if (allFlattenedTasks.length === 0) {
       setProgress(0);
       return;
     }
     
-    const completedTasks = flattenedTasks.filter(task => task.completed).length;
-    const totalTasks = flattenedTasks.length;
+    const completedTasks = allFlattenedTasks.filter(task => task.completed).length;
+    const totalTasks = allFlattenedTasks.length;
     
     setProgress(Math.round((completedTasks / totalTasks) * 100));
-  }, [flattenedTasks]);
+  }, [allFlattenedTasks]);
   
   // Fetch task list details and tasks
   useEffect(() => {
@@ -266,6 +292,7 @@ const TaskPage = () => {
   // Update flattened tasks whenever allTasks changes
   useEffect(() => {
     setFlattenedTasks(flattenTasksWithLevels(allTasks));
+    setAllFlattenedTasks(flattenAllTasksWithLevels(allTasks));
   }, [allTasks]);
   
   // Focus input when editing starts
@@ -1035,13 +1062,52 @@ const TaskPage = () => {
     }
   };
   
-  // Filtered tasks based on current filter
-  const filteredTasks = flattenedTasks.filter(task => {
-    if (filter === 'all') return true;
-    if (filter === 'completed') return task.completed;
-    if (filter === 'active') return !task.completed;
-    return true;
-  });
+  // Get filtered tasks based on current filter, ensuring children are shown properly
+  const getFilteredTasks = (): Task[] => {
+    if (filter === 'all') {
+      // For 'all' filter, just use the normal flattened list that respects expanded state
+      return flattenedTasks;
+    }
+    
+    // For 'active' or 'completed' filters, we need to show matching tasks
+    // regardless of their parent's expanded state or completion status
+    const isCompleted = filter === 'completed';
+    
+    // Create a new flat list from the hierarchical structure
+    const result: Task[] = [];
+    
+    // Function to process tasks recursively
+    const processTasks = (tasks: Task[], level: number, forcedVisible: boolean = false) => {
+      tasks.forEach(task => {
+        const matchesFilter = task.completed === isCompleted;
+        const shouldInclude = matchesFilter || forcedVisible;
+        
+        // Include this task if it matches the filter or if we're forced to show it
+        if (shouldInclude) {
+          result.push({
+            ...task,
+            level
+          });
+        }
+        
+        // Process children, showing them all if:
+        // 1. The current task matches the filter and is expanded, or
+        // 2. We're in forced visible mode from a parent
+        if (task.children && task.children.length > 0) {
+          const forceChildrenVisible = forcedVisible || (matchesFilter && task.expanded);
+          processTasks(task.children, level + 1, forceChildrenVisible);
+        }
+      });
+    };
+    
+    // Start processing the full task tree
+    processTasks(allTasks, 0);
+    
+    return result;
+  };
+  
+  // Get the filtered tasks
+  const filteredTasks = useMemo(() => getFilteredTasks(), [filter, allTasks, flattenedTasks]);
   
   // Calculate due dates
   const getDueStatus = (dueDate?: string | null) => {
@@ -1097,7 +1163,7 @@ const TaskPage = () => {
           </div>
           <div>
             <Badge variant="outline" className="mr-2 px-3 py-1 rounded-full">
-              {`${flattenedTasks.filter(t => t.completed).length}/${flattenedTasks.length}`} tasks
+              {`${allFlattenedTasks.filter(t => t.completed).length}/${allFlattenedTasks.length}`} tasks
             </Badge>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -1386,15 +1452,15 @@ const TaskPage = () => {
         <CardFooter className="flex justify-between border-t p-4">
           <Button variant="outline" onClick={() => setFilter('all')}>
             <span className="mr-1">All</span>
-            <Badge className="ml-1">{flattenedTasks.length}</Badge>
+            <Badge className="ml-1">{allFlattenedTasks.length}</Badge>
           </Button>
           <Button variant="outline" onClick={() => setFilter('active')}>
             <span className="mr-1">Active</span>
-            <Badge className="ml-1">{flattenedTasks.filter(t => !t.completed).length}</Badge>
+            <Badge className="ml-1">{allFlattenedTasks.filter(t => !t.completed).length}</Badge>
           </Button>
           <Button variant="outline" onClick={() => setFilter('completed')}>
             <span className="mr-1">Completed</span>
-            <Badge className="ml-1">{flattenedTasks.filter(t => t.completed).length}</Badge>
+            <Badge className="ml-1">{allFlattenedTasks.filter(t => t.completed).length}</Badge>
           </Button>
         </CardFooter>
       </Card>
@@ -1425,7 +1491,7 @@ const TaskPage = () => {
             <div className="space-y-2">
               <h3 className="text-sm font-medium">Tasks</h3>
               <p className="text-sm text-muted-foreground">
-                {flattenedTasks.filter(t => t.completed).length} of {flattenedTasks.length} completed
+                {allFlattenedTasks.filter(t => t.completed).length} of {allFlattenedTasks.length} completed
               </p>
             </div>
             <div className="space-y-2">
